@@ -9,30 +9,39 @@ Original file is located at
 
 from transformers import AutoModelForCausalLM, AutoTokenizer, TextDataset, DataCollatorForLanguageModeling, Trainer, TrainingArguments
 from rouge import Rouge
+import torch
+from torch.utils.data import TensorDataset, DataLoader
 
 # Initialize the model and tokenizer
 model_name = "NousResearch/llama-2-7b-chat-hf"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
 
-# Prepare the data
-examples = [
+# Data Prep
+assessments = [
     "Assessment: A 60 year old woman with recurrent ALL with CNS involvement s/p Omaya removal due to VRE contamination & SDH evacuation.  She is now doing well and awake s/p extubation, afebrile and her WBC count is trending downward.",
-    "Summary: CNS VRE; LEUKOCYTOSIS; ALL",
     "Assessment: 53 yoM w/ a h/o schizoaffective disorder presents s/p fall with atrial flutter with a rapid ventricular response, intracranial lesion, and lung mass who  has new dx of squamous cell lung cancer with extension into left atrium, and was started on IV amio load overnight.",
-    "Summary: Atrial & Ventricular Ectopy; L hilar mass/Brain Mass; Hypoxic respiratory failure; Weakness over right UE/LE; Schizoaffective disorder",
     "Assessment: 45 year old man with pmh significant for type I DM, ESRD on hemodialysis, labile blood pressure, presenting with hypertensive emergency.",
-    "Summary: Hypertensive emergency; Chest Pain; ESRD on HD; DM",
     "Assessment: 75yo M w/stage IV lung cancer, DM type 2, afib, HTN, CRI p/w pleuritic CP, PNA, hypotention and afib with RVR.",
-    "Summary: Hypotension; PNA; Pleuritic CP; Afib; Non-small cell lung ca; DM 2; hx CRI ",
     "Assessment: ADVERSE DRUG EVENT (ADR, ADE, MEDICATION TOXICITY) tylenol od, admit level 115.5 ASSESSMENT & PLAN: 30 y.o. F with toxic ingestion and acetaminophen toxicity, presently sedated and intubated for airway protection.",
-    "Summary: Toxic Ingestion; Acetaminophen Toxicity:; # Respiratory Distress; Suicide Attempt ",
     "Assessment: 75 YOF with SAH, SDH, R gluteal hematoma, R occipital superficial laceration ",
+]
+
+summaries = [
+    "Summary: CNS VRE; LEUKOCYTOSIS; ALL",
+    "Summary: Atrial & Ventricular Ectopy; L hilar mass/Brain Mass; Hypoxic respiratory failure; Weakness over right UE/LE; Schizoaffective disorder",
+    "Summary: Hypertensive emergency; Chest Pain; ESRD on HD; DM",
+    "Summary: Hypotension; PNA; Pleuritic CP; Afib; Non-small cell lung ca; DM 2; hx CRI ",
+    "Summary: Toxic Ingestion; Acetaminophen Toxicity:; # Respiratory Distress; Suicide Attempt ",
     "Summary: seizure; COPD; large gluteal hematoma",
 ]
 
 # Tokenize the data
-inputs = tokenizer(examples, return_tensors='pt', padding=True, truncation=True)
+tokenized_assessments = tokenizer(assessments, return_tensors='pt', padding=True, truncation=True)
+tokenized_summaries = tokenizer(summaries, return_tensors='pt', padding=True, truncation=True)
+
+# Create a TensorDataset
+dataset = TensorDataset(tokenized_assessments['input_ids'], tokenized_summaries['input_ids'])
 
 # Initialize Trainer
 training_args = TrainingArguments(
@@ -48,7 +57,7 @@ training_args = TrainingArguments(
 trainer = Trainer(
     model=model,
     args=training_args,
-    train_dataset=inputs,
+    train_dataset=dataset,
 )
 
 # Train the model
@@ -58,14 +67,18 @@ trainer.train()
 model.save_pretrained("fine_tuned_llama")
 
 # Generate a summary with the fine-tuned model
-prompt = "Given an assessment, generate a summary that includes only the most critical medical information. Focus on primary diagnoses, conditions, and any significant treatment or event that occurred. Use standard medical abbreviations if appropriate."
+new_assessment = "84 yo M with COPD, Afib, s/p hip partial replacement p/w altered mental status, tachycardia, hypoxemia, LLE edema, and left hip/knee pain."
+prompt = "Assessment: " + new_assessment
 input_ids = tokenizer.encode(prompt, return_tensors='pt')
 output = model.generate(input_ids, max_length=200, num_return_sequences=1)
 generated_summary = tokenizer.decode(output[0], skip_special_tokens=True)
 
+print(f"Generated Summary: {generated_summary}")
+
 # Calculate ROUGE-L score
 rouge = Rouge()
-scores = rouge.get_scores(generated_summary, "Your actual summary here")
+actual_summary = "Altered mental status; Atrial fibrillation with RVR; Pneumonia; Congestive Heart Failure; COPD; Possible hip dislocation; LLE edema"
+scores = rouge.get_scores(generated_summary, actual_summary)
 rouge_l = scores[0]['rouge-l']
 
 print(f"ROUGE-L score: {rouge_l}")
